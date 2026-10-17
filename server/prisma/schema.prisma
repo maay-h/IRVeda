@@ -1,0 +1,203 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  RECEPTIONIST
+  DOCTOR
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  RESCHEDULED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Staff {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(RECEPTIONIST)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  statusHistory AppointmentStatusHistory[]
+}
+
+model Doctor {
+  id              Int      @id @default(autoincrement())
+  name            String
+  qualification   String
+  specialization  String
+  bio             String?
+  photoUrl        String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  schedules       DoctorSchedule[]
+  exceptions      ScheduleException[]
+  appointments    Appointment[]
+}
+
+model DoctorSchedule {
+  id        Int    @id @default(autoincrement())
+  doctorId  Int
+  dayOfWeek Int // 0 = Sunday ... 6 = Saturday
+  startTime String // "09:00"
+  endTime   String // "13:00"
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+}
+
+model ScheduleException {
+  id        Int      @id @default(autoincrement())
+  doctorId  Int
+  date      String   // YYYY-MM-DD
+  reason    String?
+  allDay    Boolean  @default(true)
+  fromTime  String?
+  toTime    String?
+
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+}
+
+model ServiceCategory {
+  id          Int       @id @default(autoincrement())
+  name        String
+  slug        String    @unique
+  displayOrder Int      @default(0)
+  active      Boolean   @default(true)
+
+  services    Service[]
+}
+
+model Service {
+  id          Int       @id @default(autoincrement())
+  name        String
+  slug        String    @unique
+  description String?
+  tagline     String?
+  icon        String?
+  featured    Boolean   @default(false)
+  active      Boolean   @default(true)
+  displayOrder Int      @default(0)
+  categoryId  Int
+
+  category        ServiceCategory @relation(fields: [categoryId], references: [id])
+  questionnaires  Questionnaire[]
+  appointments    Appointment[]
+}
+
+model Patient {
+  id          Int      @id @default(autoincrement())
+  name        String
+  phone       String
+  email       String?
+  age         Int?
+  gender      String?
+  city        String?
+  createdAt   DateTime @default(now())
+
+  appointments Appointment[]
+}
+
+model Appointment {
+  id             Int               @id @default(autoincrement())
+  appointmentNo  String            @unique
+  patientId      Int
+  serviceId      Int
+  doctorId       Int
+  date           String // YYYY-MM-DD
+  startTime      String // "10:30"
+  durationMin    Int               @default(30)
+  status         AppointmentStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  patient   Patient   @relation(fields: [patientId], references: [id])
+  service   Service   @relation(fields: [serviceId], references: [id])
+  doctor    Doctor    @relation(fields: [doctorId], references: [id])
+  responses QuestionnaireResponse[]
+
+  @@unique([doctorId, date, startTime])
+  @@index([status])
+  @@index([date])
+
+  statusHistory AppointmentStatusHistory[]
+}
+
+model AppointmentStatusHistory {
+  id            Int               @id @default(autoincrement())
+  appointmentId Int
+  fromStatus    AppointmentStatus?
+  toStatus      AppointmentStatus
+  changedById   Int?
+  note          String?
+  createdAt     DateTime          @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  changedBy   Staff?      @relation(fields: [changedById], references: [id])
+}
+
+model Questionnaire {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  serviceId   Int?      // null = general questionnaire
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  service    Service?        @relation(fields: [serviceId], references: [id])
+  questions  QuestionnaireQuestion[]
+  responses  QuestionnaireResponse[]
+}
+
+model QuestionnaireQuestion {
+  id              Int     @id @default(autoincrement())
+  questionnaireId Int
+  label           String
+  questionType    String  // TEXT | NUMBER | DATE | YES_NO | SINGLE | MULTIPLE | DROPDOWN
+  required        Boolean @default(false)
+  displayOrder    Int     @default(0)
+  options         String? // JSON array for SINGLE/MULTIPLE/DROPDOWN
+  active          Boolean @default(true)
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  answers       QuestionnaireAnswer[]
+}
+
+model QuestionnaireResponse {
+  id            Int           @id @default(autoincrement())
+  appointmentId Int
+  questionnaireId Int
+  submittedAt   DateTime      @default(now())
+
+  appointment   Appointment          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  questionnaire Questionnaire        @relation(fields: [questionnaireId], references: [id])
+  answers       QuestionnaireAnswer[]
+}
+
+model QuestionnaireAnswer {
+  id          Int                   @id @default(autoincrement())
+  responseId  Int
+  questionId  Int
+  value       String
+
+  response QuestionnaireResponse  @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  question QuestionnaireQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
