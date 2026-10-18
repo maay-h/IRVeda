@@ -10,7 +10,6 @@ async function main() {
   const staff = await prisma.staff.createMany({
     data: [
       { name: "Super Admin", email: "admin@irveda.com", passwordHash, role: "SUPER_ADMIN" },
-      { name: "Receptionist", email: "reception@irveda.com", passwordHash, role: "RECEPTIONIST" },
       { name: "Dr. Doctor", email: "doctor@irveda.com", passwordHash, role: "DOCTOR" },
     ],
   });
@@ -260,7 +259,7 @@ async function main() {
   console.log("Seeded questionnaires:", generalQ.id);
 
   console.log("\nSeeding complete.");
-  console.log("Login: admin@irveda.com / admin123 (also reception@irveda.com, doctor@irveda.com)");
+  console.log("Login: admin@irveda.com / admin123 (also doctor@irveda.com)");
 }
 
 main()

@@ -5,13 +5,13 @@ import Spinner from "../../components/Spinner.jsx";
 const inputCls =
   "w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-leaf-600/40 focus:border-leaf-600 transition";
 
-const ROLES = ["SUPER_ADMIN", "ADMIN", "RECEPTIONIST", "DOCTOR"];
+const ROLES = ["SUPER_ADMIN", "ADMIN", "DOCTOR"];
 
 export default function StaffPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "RECEPTIONIST" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "DOCTOR" });
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -37,7 +37,7 @@ export default function StaffPage() {
     setSaving(true);
     try {
       await api.post("/admin/staff", form);
-      setForm({ name: "", email: "", password: "", role: "RECEPTIONIST" });
+      setForm({ name: "", email: "", password: "", role: "DOCTOR" });
       await load();
     } catch (err) {
       setError(err.message);

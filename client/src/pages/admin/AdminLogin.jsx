@@ -88,8 +88,6 @@ export default function AdminLogin() {
             <br />
             admin@irveda.com / admin123 (Admin)
             <br />
-            reception@irveda.com / admin123 (Receptionist)
-            <br />
             doctor@irveda.com / admin123 (Doctor)
           </div>
         </div>
