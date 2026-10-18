@@ -155,8 +155,8 @@ export default function BookAppointment() {
     return Object.keys(e).length === 0
   }
 
-  const submit = async () => {
-    if (!validateAnswers()) return
+  const submit = async (skipValidation = false) => {
+    if (!skipValidation && !validateAnswers()) return
     setSubmitting(true)
     setSubmitError('')
     try {
@@ -199,6 +199,12 @@ export default function BookAppointment() {
   }
 
   const prev = () => setStep(s => s - 1)
+
+  const skipQuestionnaire = () => {
+    setErrors({})
+    setAnswers({})
+    submit(true)
+  }
 
   const selectedService = services.find(s => s.id === booking.serviceSlug)
 
@@ -484,7 +490,7 @@ export default function BookAppointment() {
               {step === 4 && (
                 <div>
                   <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700, color: 'var(--color-forest)', marginBottom: '0.5rem' }}>
-                    Pre-Consultation Questionnaire
+                    Pre-Consultation Questionnaire <span style={{ fontSize: '0.875rem', fontWeight: 400, color: 'var(--color-text-muted)' }}>(optional)</span>
                   </h2>
                   <p style={{ color: 'var(--color-text-muted)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
                     {questionnaire?.description || 'These questions help our physician prepare for your consultation.'}
@@ -588,6 +594,26 @@ export default function BookAppointment() {
             >
               <ChevronLeft size={16} /> Back
             </button>
+            {step === STEPS.length - 2 && (
+              <button
+                type="button"
+                onClick={skipQuestionnaire}
+                disabled={submitting}
+                style={{
+                  padding: '0.75rem 1.25rem',
+                  border: '1.5px solid var(--color-beige)',
+                  borderRadius: '100px',
+                  background: 'white',
+                  color: 'var(--color-text-muted)',
+                  cursor: submitting ? 'not-allowed' : 'pointer',
+                  fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 500,
+                  opacity: submitting ? 0.5 : 1,
+                  minHeight: '44px',
+                }}
+              >
+                Skip questionnaire
+              </button>
+            )}
             <button
               type="button"
               onClick={next}
