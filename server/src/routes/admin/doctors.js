@@ -105,6 +105,27 @@ router.post(
 );
 
 router.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const doctorId = Number(req.params.id);
+    const doctor = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      include: { _count: { select: { appointments: true } } },
+    });
+    if (!doctor) return res.status(404).json({ error: "Doctor not found" });
+    if (doctor._count.appointments > 0) {
+      return res.status(409).json({
+        error:
+          "Cannot delete: this doctor already has appointments. Use Deactivate instead so existing records stay intact.",
+      });
+    }
+    // Schedules and exceptions are removed by the schema's onDelete: Cascade
+    await prisma.doctor.delete({ where: { id: doctorId } });
+    res.json({ ok: true });
+  })
+);
+
+router.delete(
   "/:id/exceptions/:exceptionId",
   asyncHandler(async (req, res) => {
     await prisma.scheduleException.delete({ where: { id: Number(req.params.exceptionId) } });

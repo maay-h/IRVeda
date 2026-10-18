@@ -239,6 +239,59 @@ function ScheduleEditor({ doctor, onClose }) {
   );
 }
 
+function DeleteDoctorModal({ doctor, onClose, onDeleted }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  const remove = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await api.del(`/admin/doctors/${doctor.id}`);
+      onDeleted();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-display text-xl font-bold text-leaf-900">Delete {doctor.name}?</h3>
+        <p className="mt-3 text-sm text-stone-500">
+          This permanently removes the doctor along with their weekly schedule and exceptions.
+          {doctor._count?.appointments > 0
+            ? ` This doctor has ${doctor._count.appointments} appointment(s) and cannot be deleted — use Deactivate instead.`
+            : " This cannot be undone."}
+        </p>
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-stone-500 hover:bg-stone-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={remove}
+            disabled={deleting}
+            className="px-5 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+          >
+            {deleting ? "Deleting…" : "Delete Doctor"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExceptionsModal({ doctor, onClose }) {
   const [exceptions, setExceptions] = useState(doctor.exceptions || []);
   const [form, setForm] = useState({ date: "", reason: "", allDay: true, fromTime: "09:00", toTime: "13:00" });
@@ -351,6 +404,7 @@ export default function Doctors() {
   const [modal, setModal] = useState(null);
   const [schedFor, setSchedFor] = useState(null);
   const [excFor, setExcFor] = useState(null);
+  const [deleteFor, setDeleteFor] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -424,6 +478,12 @@ export default function Doctors() {
                       <button onClick={() => toggleActive(d)} className="px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-semibold text-stone-600 hover:bg-stone-50">
                         {d.active ? "Deactivate" : "Activate"}
                       </button>
+                      <button
+                        onClick={() => setDeleteFor(d)}
+                        className="px-3 py-1.5 rounded-lg border border-red-300 text-xs font-semibold text-red-600 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
                     </>
                   )}
                   <button onClick={() => setSchedFor(d)} className="px-3 py-1.5 rounded-lg border border-leaf-700 text-leaf-800 text-xs font-semibold hover:bg-leaf-50">
@@ -459,6 +519,9 @@ export default function Doctors() {
       {modal && <DoctorModal doctor={modal.id ? modal : null} onClose={() => setModal(null)} onSaved={load} />}
       {schedFor && <ScheduleEditor doctor={schedFor} onClose={() => setSchedFor(null)} />}
       {excFor && <ExceptionsModal doctor={excFor} onClose={() => setExcFor(null)} />}
+      {deleteFor && (
+        <DeleteDoctorModal doctor={deleteFor} onClose={() => setDeleteFor(null)} onDeleted={load} />
+      )}
     </div>
   );
 }
