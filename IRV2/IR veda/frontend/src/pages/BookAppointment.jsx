@@ -6,9 +6,34 @@ import {
   Sparkles, Flower2, Heart, Activity, ShieldCheck, Copy,
   Check, MapPin
 } from 'lucide-react'
-import axios from 'axios'
+import { cachedGet, readCache } from '../lib/apiCache'
 
 const API = import.meta.env.VITE_API_BASE_URL || '/api'
+
+function flattenServices(cats) {
+  const flat = []
+  ;(cats || []).forEach(cat => {
+    (cat.services || []).forEach(s => {
+      flat.push({
+        id: s.slug,
+        name: s.name,
+        category: cat.name,
+        icon: ICONS[s.slug] || Activity,
+        featured: !!s.featured,
+      })
+    })
+  })
+  return flat
+}
+
+function pickDoctor(list) {
+  const siteDoctor = (import.meta.env.VITE_DOCTOR_NAME || '').trim()
+  return (list || []).find(d => siteDoctor && siteDoctor.startsWith(d.name)) || (list || [])[0] || null
+}
+
+function toSlotObjs(slots) {
+  return (slots || []).map(s => ({ value: s, label: to12h(s) }))
+}
 
 const ICONS = {
   'body-detox': Sparkles,
@@ -56,15 +81,17 @@ export default function BookAppointment() {
     name: '', phone: '', email: '', age: '', city: '', notes: '',
   })
 
-  const [services, setServices] = useState([])
-  const [loadingServices, setLoadingServices] = useState(true)
+  const [services, setServices] = useState(() => flattenServices(readCache('/services')))
   const [servicesError, setServicesError] = useState('')
-  const [doctor, setDoctor] = useState(null)
-  const [questionnaire, setQuestionnaire] = useState(null)
+  const [doctor, setDoctor] = useState(() => pickDoctor(readCache('/doctors')))
+  const [questionnaire, setQuestionnaire] = useState(() =>
+    booking.serviceSlug ? (readCache(`/services/${booking.serviceSlug}/questionnaire`) ?? null) : null
+  )
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(false)
   const [answers, setAnswers] = useState({})
 
   const [slots, setSlots] = useState([])
-  const [loadingSlots, setLoadingSlots] = useState(false)
+  const [slotsReady, setSlotsReady] = useState(false)
   const [slotsError, setSlotsError] = useState('')
 
   const [submitting, setSubmitting] = useState(false)
@@ -73,59 +100,56 @@ export default function BookAppointment() {
   const [errors, setErrors] = useState({})
   const [copied, setCopied] = useState(false)
 
-  // Services come from the bookings API (single source of truth)
+  // Services + doctor: instant from cache, refreshed in background
   useEffect(() => {
-    axios.get(`${API}/services`)
-      .then(res => {
-        const flat = []
-        ;(res.data || []).forEach(cat => {
-          (cat.services || []).forEach(s => {
-            flat.push({
-              id: s.slug,
-              name: s.name,
-              category: cat.name,
-              icon: ICONS[s.slug] || Activity,
-              featured: !!s.featured,
-            })
-          })
-        })
-        setServices(flat)
-      })
-      .catch(() => setServicesError('Could not load services. Please refresh the page.'))
-      .finally(() => setLoadingServices(false))
+    let alive = true
+    cachedGet('/services')
+      .then(data => { if (alive) setServices(flattenServices(data)) })
+      .catch(() => { if (alive) setServicesError('Could not load services. Please refresh the page.') })
+    cachedGet('/doctors')
+      .then(list => { if (alive) setDoctor(pickDoctor(list)) })
+      .catch(() => {})
+    return () => { alive = false }
   }, [])
 
-  // Clinic doctor (prefer the one the website advertises)
+  // Real availability for this doctor + date (cached per date)
   useEffect(() => {
-    axios.get(`${API}/doctors`)
-      .then(res => {
-        const list = res.data || []
-        const siteDoctor = (import.meta.env.VITE_DOCTOR_NAME || '').trim()
-        setDoctor(list.find(d => siteDoctor && siteDoctor.startsWith(d.name)) || list[0] || null)
-      })
-      .catch(() => setDoctor(null))
-  }, [])
-
-  // Real availability for this doctor + date
-  useEffect(() => {
-    if (doctor?.id && booking.date) {
-      setLoadingSlots(true)
-      setSlotsError('')
-      axios.get(`${API}/schedules/${doctor.id}/slots?date=${booking.date}`)
-        .then(res => setSlots((res.data?.slots || []).map(s => ({ value: s, label: to12h(s) }))))
-        .catch(() => { setSlots([]); setSlotsError('Could not load available slots. Please try again.') })
-        .finally(() => setLoadingSlots(false))
+    if (!doctor?.id || !booking.date) return
+    const path = `/schedules/${doctor.id}/slots?date=${booking.date}`
+    const cached = readCache(path)
+    if (cached) {
+      setSlots(toSlotObjs(cached.slots))
+      setSlotsReady(true)
+    } else {
+      setSlots([])
+      setSlotsReady(false)
     }
+    setSlotsError('')
+    let alive = true
+    cachedGet(path, { ttl: 60 * 1000 })
+      .then(data => { if (alive) { setSlots(toSlotObjs(data.slots)); setSlotsReady(true) } })
+      .catch(() => { if (alive) { setSlots([]); setSlotsReady(true); setSlotsError('Could not load available slots. Please try again.') } })
+    return () => { alive = false }
   }, [doctor?.id, booking.date])
 
-  // Questionnaire for the chosen service (falls back to the general one)
+  // Questionnaire for the chosen service (cached per service)
   useEffect(() => {
-    if (booking.serviceSlug) {
-      axios.get(`${API}/services/${booking.serviceSlug}/questionnaire`)
-        .then(res => setQuestionnaire(res.data || null))
-        .catch(() => setQuestionnaire(null))
-    }
+    if (!booking.serviceSlug) return
+    const path = `/services/${booking.serviceSlug}/questionnaire`
+    const cached = readCache(path)
+    setQuestionnaire(cached ?? null)
+    setQuestionnaireLoading(cached == null)
+    let alive = true
+    cachedGet(path)
+      .then(data => { if (alive) { setQuestionnaire(data || null); setQuestionnaireLoading(false) } })
+      .catch(() => { if (alive) { setQuestionnaire(null); setQuestionnaireLoading(false) } })
+    return () => { alive = false }
   }, [booking.serviceSlug])
+
+  // Always show the top of the form when moving between steps
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [step])
 
   const set = (field, value) => setBooking(b => ({ ...b, [field]: value }))
 
@@ -160,24 +184,30 @@ export default function BookAppointment() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      const res = await axios.post(`${API}/appointments`, {
-        serviceSlug: booking.serviceSlug,
-        doctorId: doctor.id,
-        date: booking.date,
-        startTime: booking.startTime,
-        patient: {
-          name: booking.name.trim(),
-          phone: booking.phone.trim(),
-          email: booking.email.trim(),
-          age: booking.age ? Number(booking.age) : null,
-          city: booking.city.trim() || null,
-        },
-        notes: booking.notes,
-        answers: (questionnaire?.questions || [])
-          .map(q => ({ questionId: q.id, value: String(answers[q.id] ?? '').trim() }))
-          .filter(a => a.value !== ''),
+      const res = await fetch(`${API}/appointments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceSlug: booking.serviceSlug,
+          doctorId: doctor.id,
+          date: booking.date,
+          startTime: booking.startTime,
+          patient: {
+            name: booking.name.trim(),
+            phone: booking.phone.trim(),
+            email: booking.email.trim(),
+            age: booking.age ? Number(booking.age) : null,
+            city: booking.city.trim() || null,
+          },
+          notes: booking.notes,
+          answers: (questionnaire?.questions || [])
+            .map(q => ({ questionId: q.id, value: String(answers[q.id] ?? '').trim() }))
+            .filter(a => a.value !== ''),
+        }),
       })
-      setRefId(res.data.appointmentNo)
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw { response: { status: res.status, data } }
+      setRefId(data.appointmentNo)
       setStep(s => s + 1)
     } catch (err) {
       const msg = err.response?.data?.error || 'Could not submit your booking. Please try again.'
@@ -288,8 +318,12 @@ export default function BookAppointment() {
                   </p>
                   {servicesError && <p style={{ color: '#e53e3e', fontSize: '0.8125rem', marginBottom: '1rem' }}>{servicesError}</p>}
                   {errors.serviceSlug && <p style={{ color: '#e53e3e', fontSize: '0.8125rem', marginBottom: '1rem' }}>{errors.serviceSlug}</p>}
-                  {loadingServices ? (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>Loading services...</div>
+                  {services.length === 0 && !servicesError ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: '0.75rem' }}>
+                      {[...Array(6)].map((_, i) => (
+                        <div key={i} className="irv-skeleton" style={{ height: '64px', borderRadius: '16px' }} />
+                      ))}
+                    </div>
                   ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: '0.75rem' }}>
                       {services.map(service => {
@@ -385,8 +419,12 @@ export default function BookAppointment() {
                   {errors.startTime && <p style={{ color: '#e53e3e', fontSize: '0.8125rem', marginBottom: '1rem' }}>{errors.startTime}</p>}
                   {slotsError && <p style={{ color: '#e53e3e', fontSize: '0.8125rem', marginBottom: '1rem' }}>{slotsError}</p>}
 
-                  {loadingSlots ? (
-                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>Loading available slots...</div>
+                  {!slotsReady ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '0.625rem' }}>
+                      {[...Array(10)].map((_, i) => (
+                        <div key={i} className="irv-skeleton" style={{ height: '42px', borderRadius: '10px' }} />
+                      ))}
+                    </div>
                   ) : slots.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-text-muted)' }}>
                       No slots available on this date. The clinic is closed on Sundays — please pick another day.
@@ -496,7 +534,13 @@ export default function BookAppointment() {
                     {questionnaire?.description || 'These questions help our physician prepare for your consultation.'}
                   </p>
 
-                  {!questionnaire || !(questionnaire.questions || []).length ? (
+                  {questionnaireLoading ? (
+                    <div style={{ display: 'grid', gap: '1rem' }}>
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="irv-skeleton" style={{ height: '48px', borderRadius: '10px' }} />
+                      ))}
+                    </div>
+                  ) : !questionnaire || !(questionnaire.questions || []).length ? (
                     <p style={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
                       No additional questions for this consultation. You're all set — submit below.
                     </p>
@@ -574,23 +618,12 @@ export default function BookAppointment() {
 
         {/* Navigation Buttons */}
         {step < STEPS.length - 1 && (
-          <div className="booking-nav-buttons" style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginTop: '1.5rem' }}>
+          <div className="booking-nav">
             <button
               type="button"
               onClick={prev}
               disabled={step === 0}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.375rem',
-                padding: '0.75rem 1.25rem',
-                border: '1.5px solid var(--color-beige)',
-                borderRadius: '100px',
-                background: 'white',
-                color: step === 0 ? 'var(--color-text-muted)' : 'var(--color-forest)',
-                cursor: step === 0 ? 'not-allowed' : 'pointer',
-                fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 500,
-                opacity: step === 0 ? 0.4 : 1,
-                minHeight: '44px',
-              }}
+              className="booking-nav-secondary"
             >
               <ChevronLeft size={16} /> Back
             </button>
@@ -599,30 +632,19 @@ export default function BookAppointment() {
                 type="button"
                 onClick={skipQuestionnaire}
                 disabled={submitting}
-                style={{
-                  padding: '0.75rem 1.25rem',
-                  border: '1.5px solid var(--color-beige)',
-                  borderRadius: '100px',
-                  background: 'white',
-                  color: 'var(--color-text-muted)',
-                  cursor: submitting ? 'not-allowed' : 'pointer',
-                  fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: 500,
-                  opacity: submitting ? 0.5 : 1,
-                  minHeight: '44px',
-                }}
+                className="booking-nav-secondary"
               >
-                Skip questionnaire
+                Skip
               </button>
             )}
             <button
               type="button"
               onClick={next}
-              disabled={submitting || (step === 2 && !loadingSlots && slots.length === 0)}
-              className="btn-primary"
-              style={{ minHeight: '44px', padding: '0.75rem 1.5rem' }}
+              disabled={submitting || (step === 2 && !slotsReady && slots.length === 0)}
+              className="booking-nav-primary"
             >
-              {submitting ? 'Submitting...' : step === STEPS.length - 2 ? 'Submit Appointment' : 'Continue'}
-              {!submitting && <ChevronRight size={16} />}
+              {submitting ? 'Submitting…' : step === STEPS.length - 2 ? 'Submit' : 'Continue'}
+              {!submitting && step !== STEPS.length - 2 && <ChevronRight size={16} />}
             </button>
           </div>
         )}
@@ -633,6 +655,64 @@ export default function BookAppointment() {
       </div>
 
       <style>{`
+        .booking-nav {
+          display: flex;
+          gap: 0.5rem;
+          margin-top: 1.5rem;
+        }
+        .booking-nav button {
+          min-height: 44px;
+          border-radius: 100px;
+          font-family: var(--font-body);
+          font-size: 0.8125rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s;
+          padding: 0.625rem 0.75rem;
+          flex: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.25rem;
+        }
+        .booking-nav-secondary {
+          border: 1.5px solid var(--color-beige);
+          background: white;
+          color: var(--color-forest);
+        }
+        .booking-nav-secondary:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        .booking-nav-primary {
+          border: none;
+          background: var(--color-forest);
+          color: white;
+          font-weight: 600;
+        }
+        .booking-nav-primary:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        @media (min-width: 640px) {
+          .booking-nav button {
+            flex: 0 0 auto;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.875rem;
+          }
+          .booking-nav .booking-nav-primary {
+            flex: 1;
+          }
+        }
+        .irv-skeleton {
+          background: linear-gradient(90deg, var(--color-beige) 25%, #f0ebe3 50%, var(--color-beige) 75%);
+          background-size: 200% 100%;
+          animation: irv-shimmer 1.2s infinite;
+        }
+        @keyframes irv-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
         @media (max-width: 640px) {
           .details-form-grid {
             grid-template-columns: 1fr !important;

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import Navbar from './components/layout/Navbar'
@@ -14,8 +15,14 @@ import BookAppointment from './pages/BookAppointment'
 import About from './pages/About'
 import Contact from './pages/Contact'
 import ScrollToTop from './components/utils/ScrollToTop'
+import { prefetch } from './lib/apiCache'
 
 export default function App() {
+  useEffect(() => {
+    prefetch('/services')
+    prefetch('/doctors')
+  }, [])
+
   return (
     <BrowserRouter>
       <ScrollToTop />
